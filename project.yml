@@ -1,0 +1,22 @@
+name: IsMyMicOn
+options:
+  bundleIdPrefix: com.yansenzhou
+  deploymentTarget:
+    macOS: "11.0"
+targets:
+  IsMyMicOn:
+    type: application
+    platform: macOS
+    sources:
+      - Sources
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: IsMyMicOn
+        LSUIElement: true
+        NSMicrophoneUsageDescription: Mic access is needed to show the input level meter.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.yansenzhou.ismymicon
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
