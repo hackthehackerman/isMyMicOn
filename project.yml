@@ -14,7 +14,7 @@ targets:
       properties:
         CFBundleDisplayName: IsMyMicOn
         LSUIElement: true
-        NSMicrophoneUsageDescription: Mic access is needed to show the input level meter.
+        NSMicrophoneUsageDescription: Microphone access is used to show the input level meter.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.yansenzhou.ismymicon

@@ -85,7 +85,18 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             inputLevelItem = item
             menu.addItem(item)
         } else {
-            let item = NSMenuItem(title: "Mic access required for level meter", action: #selector(requestMicAccess), keyEquivalent: "")
+            let status = MicPermission.authorizationStatus()
+            let title: String
+            let action: Selector
+            if status == .notDetermined {
+                title = "Grant microphone access to show input level"
+                action = #selector(requestMicAccess)
+            } else {
+                title = "Open Privacy Settings to allow microphone"
+                action = #selector(openMicSettings)
+            }
+
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
             item.target = self
             menu.addItem(item)
         }
@@ -295,6 +306,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 self?.rebuildMenu()
             }
         }
+    }
+
+    @objc private func openMicSettings() {
+        _ = MicPermission.openSystemSettings()
     }
 
     @objc private func quit() {
