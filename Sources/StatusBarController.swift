@@ -96,8 +96,12 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 action = #selector(openMicSettings)
             }
 
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-            item.target = self
+            let item = makeActionItem(
+                title: title,
+                isChecked: false,
+                action: action,
+                representedObject: nil
+            )
             menu.addItem(item)
         }
 
@@ -301,15 +305,21 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func requestMicAccess() {
-        MicPermission.requestAccess { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.rebuildMenu()
+        menu.cancelTracking()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            MicPermission.requestAccess { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.rebuildMenu()
+                }
             }
         }
     }
 
     @objc private func openMicSettings() {
-        _ = MicPermission.openSystemSettings()
+        menu.cancelTracking()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            _ = MicPermission.openSystemSettings()
+        }
     }
 
     @objc private func quit() {

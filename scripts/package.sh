@@ -11,6 +11,7 @@ NOTARY_ZIP="$BUILD_DIR/${APP_NAME}-notary.zip"
 
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-}"
+ENTITLEMENTS_PATH="$ROOT_DIR/IsMyMicOn.entitlements"
 
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
@@ -37,7 +38,11 @@ if [[ -n "$NOTARY_PROFILE" && -z "$CODESIGN_IDENTITY" ]]; then
 fi
 
 if [[ -n "$CODESIGN_IDENTITY" ]]; then
-  codesign --force --options runtime --timestamp --sign "$CODESIGN_IDENTITY" "$STAGING_APP"
+  if [[ ! -f "$ENTITLEMENTS_PATH" ]]; then
+    echo "Entitlements file not found at $ENTITLEMENTS_PATH"
+    exit 1
+  fi
+  codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS_PATH" --sign "$CODESIGN_IDENTITY" "$STAGING_APP"
   codesign --verify --strict "$STAGING_APP"
 fi
 
