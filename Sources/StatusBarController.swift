@@ -1,4 +1,5 @@
 import AppKit
+import CoreAudio
 
 final class StatusBarController: NSObject, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -10,6 +11,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private var inputLevelItem: NSMenuItem?
     private var outputVolumeItem: NSMenuItem?
     private let showVirtualDevicesKey = "ShowVirtualAudioDevices"
+    private let systemObjectID = AudioObjectID(UInt32(kAudioObjectSystemObject))
+    private let listenerQueue = DispatchQueue(label: "IsMyMicOn.AudioListeners")
+    private var defaultInputListener: AudioObjectPropertyListenerBlock?
+    private var defaultOutputListener: AudioObjectPropertyListenerBlock?
+    private var isMenuOpen = false
 
     private var showVirtualDevices: Bool {
         get { UserDefaults.standard.bool(forKey: showVirtualDevicesKey) }
@@ -42,9 +48,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         statusItem.isVisible = true
         rebuildMenu()
         statusItem.menu = menu
+        startObservingDefaultDeviceChanges()
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        isMenuOpen = true
         rebuildMenu()
         if MicPermission.isGranted {
             inputMeter.start()
@@ -52,6 +60,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     func menuDidClose(_ menu: NSMenu) {
+        isMenuOpen = false
         inputMeter.stop()
     }
 
@@ -193,6 +202,44 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let outputText = "Out: \(shortDeviceName(outputName))"
         statusContentView.update(inputText: inputText, outputText: outputText)
         statusItem.length = statusContentView.intrinsicContentSize.width
+    }
+
+    private func startObservingDefaultDeviceChanges() {
+        let inputAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let outputAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let inputListener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            self?.handleDefaultDeviceChange()
+        }
+        let outputListener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            self?.handleDefaultDeviceChange()
+        }
+
+        defaultInputListener = inputListener
+        defaultOutputListener = outputListener
+
+        var mutableInput = inputAddress
+        var mutableOutput = outputAddress
+        AudioObjectAddPropertyListenerBlock(systemObjectID, &mutableInput, listenerQueue, inputListener)
+        AudioObjectAddPropertyListenerBlock(systemObjectID, &mutableOutput, listenerQueue, outputListener)
+    }
+
+    private func handleDefaultDeviceChange() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.updateStatusText()
+            if self.isMenuOpen {
+                self.rebuildMenu()
+            }
+        }
     }
 
     private func shortDeviceName(_ name: String) -> String {
