@@ -1,4 +1,5 @@
 import CoreAudio
+import Darwin
 
 struct AudioDevice: Equatable {
     let id: AudioObjectID
@@ -7,6 +8,11 @@ struct AudioDevice: Equatable {
     static func == (lhs: AudioDevice, rhs: AudioDevice) -> Bool {
         lhs.id == rhs.id
     }
+}
+
+struct AudioDeviceUseState {
+    let isRunningSomewhere: Bool
+    let isHoggedByAnotherProcess: Bool
 }
 
 final class AudioDeviceManager {
@@ -40,6 +46,11 @@ final class AudioDeviceManager {
     func outputVolume() -> Float? {
         guard let device = defaultOutputDevice() else { return nil }
         return readOutputVolume(deviceID: device.id)
+    }
+
+    func defaultInputDeviceUseState() -> AudioDeviceUseState? {
+        guard let device = defaultInputDevice() else { return nil }
+        return deviceUseState(device.id)
     }
 
     private func devices(for scope: AudioObjectPropertyScope, includeVirtual: Bool) -> [AudioDevice] {
@@ -231,5 +242,42 @@ final class AudioDeviceManager {
         guard status == noErr else { return nil }
 
         return volume
+    }
+
+    private func deviceUseState(_ deviceID: AudioObjectID) -> AudioDeviceUseState {
+        let isRunning = deviceIsRunningSomewhere(deviceID) ?? false
+        let hogPID = deviceHogModePID(deviceID)
+        let isHogged = hogPID != nil && hogPID != -1 && hogPID != getpid()
+        return AudioDeviceUseState(isRunningSomewhere: isRunning, isHoggedByAnotherProcess: isHogged)
+    }
+
+    private func deviceIsRunningSomewhere(_ deviceID: AudioObjectID) -> Bool? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        guard AudioObjectHasProperty(deviceID, &address) else { return nil }
+
+        var isRunning: UInt32 = 0
+        var dataSize = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &dataSize, &isRunning)
+        guard status == noErr else { return nil }
+        return isRunning != 0
+    }
+
+    private func deviceHogModePID(_ deviceID: AudioObjectID) -> pid_t? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyHogMode,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        guard AudioObjectHasProperty(deviceID, &address) else { return nil }
+
+        var pid: pid_t = -1
+        var dataSize = UInt32(MemoryLayout<pid_t>.size)
+        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &dataSize, &pid)
+        guard status == noErr else { return nil }
+        return pid
     }
 }

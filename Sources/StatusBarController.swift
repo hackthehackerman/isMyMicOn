@@ -2,6 +2,12 @@ import AppKit
 import CoreAudio
 
 final class StatusBarController: NSObject, NSMenuDelegate {
+    private enum InputLevelStatus: Equatable {
+        case idle
+        case active
+        case unavailable(String)
+    }
+
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private let audioDeviceManager = AudioDeviceManager()
@@ -16,6 +22,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private var defaultInputListener: AudioObjectPropertyListenerBlock?
     private var defaultOutputListener: AudioObjectPropertyListenerBlock?
     private var isMenuOpen = false
+    private var inputRetryTimer: DispatchSourceTimer?
+    private var inputRetryAttempt = 0
+    private let inputRetryDelays: [TimeInterval] = [2, 3, 5]
+    private var inputLevelStatus: InputLevelStatus = .idle
+    private var lastInputLevel: Float = 0
 
     private var showVirtualDevices: Bool {
         get { UserDefaults.standard.bool(forKey: showVirtualDevicesKey) }
@@ -55,13 +66,15 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         isMenuOpen = true
         rebuildMenu()
         if MicPermission.isGranted {
-            inputMeter.start()
+            startInputMeterWithRetry()
         }
     }
 
     func menuDidClose(_ menu: NSMenu) {
         isMenuOpen = false
+        setInputLevelStatus(.idle)
         inputMeter.stop()
+        stopInputRetryTimer()
     }
 
     private func rebuildMenu() {
@@ -84,6 +97,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             item.isEnabled = false
             inputLevelItem = item
             menu.addItem(item)
+            applyInputLevelStatus()
         } else {
             let status = MicPermission.authorizationStatus()
             let title: String
@@ -203,18 +217,97 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     private func updateInputLevel(_ level: Float) {
+        guard inputLevelStatus == .active else { return }
         let clamped = max(0, min(1, level))
+        lastInputLevel = clamped
         let percentage = Int(clamped * 100)
         DispatchQueue.main.async { [weak self] in
             self?.inputLevelItem?.title = "Input Level: \(percentage)%"
         }
     }
 
+    private func applyInputLevelStatus() {
+        switch inputLevelStatus {
+        case .active:
+            updateInputLevel(lastInputLevel)
+        case .idle:
+            inputLevelItem?.title = "Input Level: --"
+        case .unavailable(let message):
+            inputLevelItem?.title = message
+        }
+    }
+
+    private func setInputLevelStatus(_ status: InputLevelStatus) {
+        inputLevelStatus = status
+        applyInputLevelStatus()
+    }
+
+    private func inputLevelUnavailableTitle() -> String {
+        guard let useState = audioDeviceManager.defaultInputDeviceUseState() else {
+            return "Input Level: unavailable"
+        }
+
+        if useState.isHoggedByAnotherProcess || useState.isRunningSomewhere {
+            return "Input Level: in use by another app"
+        }
+
+        return "Input Level: unavailable"
+    }
+
+    private func startInputMeterWithRetry() {
+        stopInputRetryTimer()
+        inputRetryAttempt = 0
+        attemptStartInputMeter()
+    }
+
+    private func restartInputMeterForDeviceChange() {
+        guard isMenuOpen, MicPermission.isGranted else { return }
+        setInputLevelStatus(.idle)
+        inputMeter.stop()
+        startInputMeterWithRetry()
+    }
+
+    private func attemptStartInputMeter() {
+        guard isMenuOpen, MicPermission.isGranted else { return }
+
+        let deviceID = audioDeviceManager.defaultInputDevice()?.id ?? AudioObjectID(UInt32(kAudioObjectUnknown))
+        if deviceID != AudioObjectID(UInt32(kAudioObjectUnknown)), inputMeter.start(deviceID: deviceID) {
+            setInputLevelStatus(.active)
+            stopInputRetryTimer()
+            return
+        }
+
+        setInputLevelStatus(.unavailable(inputLevelUnavailableTitle()))
+        scheduleInputRetry()
+    }
+
+    private func scheduleInputRetry() {
+        guard isMenuOpen else { return }
+
+        stopInputRetryTimer()
+        let index = min(inputRetryAttempt, inputRetryDelays.count - 1)
+        let delay = inputRetryDelays[index]
+        inputRetryAttempt += 1
+
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + delay)
+        timer.setEventHandler { [weak self] in
+            self?.attemptStartInputMeter()
+        }
+        timer.resume()
+        inputRetryTimer = timer
+    }
+
+    private func stopInputRetryTimer() {
+        inputRetryTimer?.cancel()
+        inputRetryTimer = nil
+    }
+
     private func updateStatusText() {
         let inputName = audioDeviceManager.defaultInputDevice()?.name ?? "--"
         let outputName = audioDeviceManager.defaultOutputDevice()?.name ?? "--"
-        let inputText = "In: \(shortDeviceName(inputName))"
-        let outputText = "Out: \(shortDeviceName(outputName))"
+        let inputText = shortDeviceName(inputName, maxLength: 8)
+        let outputText = shortDeviceName(outputName, maxLength: 8)
         statusContentView.update(inputText: inputText, outputText: outputText)
         statusItem.length = statusContentView.intrinsicContentSize.width
     }
@@ -232,10 +325,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         )
 
         let inputListener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            self?.handleDefaultDeviceChange()
+            self?.handleDefaultInputChange()
         }
         let outputListener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            self?.handleDefaultDeviceChange()
+            self?.handleDefaultOutputChange()
         }
 
         defaultInputListener = inputListener
@@ -247,7 +340,18 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         AudioObjectAddPropertyListenerBlock(systemObjectID, &mutableOutput, listenerQueue, outputListener)
     }
 
-    private func handleDefaultDeviceChange() {
+    private func handleDefaultInputChange() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.updateStatusText()
+            if self.isMenuOpen {
+                self.rebuildMenu()
+                self.restartInputMeterForDeviceChange()
+            }
+        }
+    }
+
+    private func handleDefaultOutputChange() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.updateStatusText()
@@ -257,7 +361,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    private func shortDeviceName(_ name: String) -> String {
+    private func shortDeviceName(_ name: String, maxLength: Int = 18) -> String {
         if name == "--" {
             return name
         }
@@ -281,7 +385,6 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             result = result.replacingOccurrences(of: "  ", with: " ")
         }
 
-        let maxLength = 18
         if result.count > maxLength {
             let endIndex = result.index(result.startIndex, offsetBy: maxLength - 3)
             result = String(result[..<endIndex]) + "..."
@@ -295,6 +398,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
               let device = button.representedObject as? AudioDevice else { return }
         audioDeviceManager.setDefaultInputDevice(device)
         rebuildMenu()
+        restartInputMeterForDeviceChange()
     }
 
     @objc private func selectOutputDevice(_ sender: Any?) {

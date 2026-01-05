@@ -1,14 +1,13 @@
 import AppKit
 
 final class StatusItemContentView: NSView {
-    private let imageView = NSImageView()
     private let inputLabel = NSTextField(labelWithString: "")
     private let outputLabel = NSTextField(labelWithString: "")
     private let textStack = NSStackView()
     private let rootStack = NSStackView()
 
-    private let horizontalPadding: CGFloat = 6
-    private let verticalPadding: CGFloat = 2
+    private let horizontalPadding: CGFloat = 1
+    private let verticalPadding: CGFloat = 0
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -37,17 +36,12 @@ final class StatusItemContentView: NSView {
     private func setupView() {
         wantsLayer = true
 
-        imageView.image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Mic")
-        imageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
-        imageView.contentTintColor = .labelColor
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-
-        inputLabel.font = NSFont.systemFont(ofSize: 9, weight: .medium)
+        inputLabel.font = NSFont.systemFont(ofSize: 8, weight: .medium)
         inputLabel.textColor = .labelColor
         inputLabel.lineBreakMode = .byTruncatingTail
         inputLabel.usesSingleLineMode = true
 
-        outputLabel.font = NSFont.systemFont(ofSize: 9, weight: .regular)
+        outputLabel.font = NSFont.systemFont(ofSize: 8, weight: .regular)
         outputLabel.textColor = .labelColor
         outputLabel.lineBreakMode = .byTruncatingTail
         outputLabel.usesSingleLineMode = true
@@ -60,8 +54,7 @@ final class StatusItemContentView: NSView {
 
         rootStack.orientation = .horizontal
         rootStack.alignment = .centerY
-        rootStack.spacing = 6
-        rootStack.addArrangedSubview(imageView)
+        rootStack.spacing = 0
         rootStack.addArrangedSubview(textStack)
 
         rootStack.translatesAutoresizingMaskIntoConstraints = false
